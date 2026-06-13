@@ -126,10 +126,119 @@ export async function fetchDefaultMaterials() {
  * @returns {Promise<{ workshops, items, defaultMaterials }>}
  */
 export async function fetchAll() {
-  const [workshops, items, defaultMaterials] = await Promise.all([
-    fetchWorkshops(),
-    fetchItems(),
-    fetchDefaultMaterials(),
-  ]);
-  return { workshops, items, defaultMaterials };
+  // Bản chuẩn Google Sheets ID gốc của ông
+  const SHEET_ID = '1tm2Z6Tc7gsPEq99kn4TeEe-KNfWhnBW6eL6MfBlCNOI'; 
+  
+  const base = 'https://docs.google.com/spreadsheets/d/';
+  const urlWorkshops = `${base}${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Xưởng`;
+  const urlItems     = `${base}${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Item`;
+  const urlMaterials = `${base}${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Nguyên liệu mặc định`;
+  const urlNotes     = `${base}${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Note`;
+
+  try {
+    const [resWs, resIt, resMat, resNote] = await Promise.all([
+      fetch(urlWorkshops).then(r => r.text()),
+      fetch(urlItems).then(r => r.text()),
+      fetch(urlMaterials).then(r => r.text()),
+      fetch(urlNotes).then(r => r.text())
+    ]);
+
+    // Hàm parse dữ liệu thô từ Google Visualization API sang mảng hàng (rows)
+    const parseGviz = (text) => {
+      const data = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
+      return data.table.rows;
+    };
+
+    const rowsWs   = parseGviz(resWs);
+    const rowsIt   = parseGviz(resIt);
+    const rowsMat  = parseGviz(resMat);
+    const rowsNote = parseGviz(resNote);
+
+    // 1. Parse Tab Xưởng (Dữ liệu dạng hàng dọc thông thường)
+    const workshops = rowsWs.map(r => ({
+      name: r.c[0]?.v || '',
+      costPerHour: parseFloat(r.c[1]?.v) || 0,
+      pointsPerHour: parseFloat(r.c[2]?.v) || 0
+    })).filter(w => w.name);
+
+    // 2. Parse Tab Item
+    const items = rowsIt.map(r => ({
+      name: r.c[0]?.v || '',
+      materials: r.c[1] ? String(r.c[1].v) : '',
+      pointsNeeded: parseFloat(r.c[2]?.v) || 0,
+      note: r.c[3]?.v || '',
+      isCustom: false
+    })).filter(it => it.name);
+
+    // 3. Parse Tab Nguyên liệu mặc định (Flexible Ma Trận Ngang)
+    const defaultMaterials = [];
+    if (rowsMat && rowsMat.length > 0) {
+      // Đọc label từ cấu trúc cột của Google để lấy: Common, Uncommon, Rare...
+      const columnsMeta = JSON.parse(resMat.substring(resMat.indexOf("{"), resMat.lastIndexOf("}") + 1)).table.cols;
+      
+      // Xác định hàng chứa số điểm (Nếu Google thu gọn còn 1 hàng thì lấy rowsMat[0], ngược lại lấy rowsMat[1])
+      const valuesRow = rowsMat.length === 1 ? rowsMat[0].c : rowsMat[1]?.c;
+
+      if (valuesRow) {
+        for (let colIdx = 0; colIdx < valuesRow.length; colIdx++) {
+          let rName = columnsMeta[colIdx]?.label || '';
+          
+          // Dự phòng nếu Google không tự biến dòng 1 thành meta label cột
+          if (!rName && rowsMat.length > 1) {
+            rName = rowsMat[0].c[colIdx]?.v || '';
+          }
+
+          const rPts = valuesRow[colIdx] ? parseFloat(valuesRow[colIdx].v) : 0;
+
+          if (rName && String(rName).trim() !== "") {
+            defaultMaterials.push({
+              rarity: String(rName).trim(),
+              points: rPts || 0
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Parse Tab Note (Flexible Tiêu đề Động từ ô A1)
+    let noteTitle = "SYSTEM LOGS"; // Giá trị mặc định nếu trống rỗng
+    const noteLogs = [];
+
+    if (rowsNote && rowsNote.length > 0) {
+      const noteColumnsMeta = JSON.parse(resNote.substring(resNote.indexOf("{"), resNote.lastIndexOf("}") + 1)).table.cols;
+      
+      if (noteColumnsMeta && noteColumnsMeta[0] && noteColumnsMeta[0].label) {
+        // Trường hợp Google nuốt ô A1 làm Label tiêu đề
+        noteTitle = noteColumnsMeta[0].label.trim();
+        rowsNote.forEach(r => {
+          if (r.c && r.c[0] && r.c[0].v !== null) noteLogs.push(String(r.c[0].v).trim());
+        });
+      } else {
+        // Trường hợp Google giữ ô A1 ở phần tử mảng đầu tiên
+        if (rowsNote[0]?.c?.[0]?.v !== null) {
+          noteTitle = String(rowsNote[0].c[0].v).trim();
+        }
+        for (let i = 1; i < rowsNote.length; i++) {
+          if (rowsNote[i]?.c?.[0]?.v !== null) {
+            noteLogs.push(String(rowsNote[i].c[0].v).trim());
+          }
+        }
+      }
+    }
+
+    // Trả về gói dữ liệu hoàn chỉnh sạch sẽ
+    return {
+      workshops,
+      items,
+      defaultMaterials,
+      systemNotes: {
+        title: noteTitle,
+        logs: noteLogs
+      }
+    };
+
+  } catch (error) {
+    console.error("Lỗi đồng bộ dữ liệu Google Sheets:", error);
+    throw error;
+  }
 }

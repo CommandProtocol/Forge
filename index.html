@@ -102,7 +102,6 @@
     tbody tr:hover { background: rgba(21, 34, 60, 0.6); }
     tbody td { padding: .75rem 1rem; vertical-align: middle; }
 
-    /* Controls cải tiến gọn gàng, không bị tù túng */
     select, input[type="number"], input[type="text"] {
       background: #090e1a;
       color: #fff;
@@ -120,19 +119,23 @@
       box-shadow: 0 0 8px rgba(0, 240, 255, 0.3);
     }
 
-    /* Form tối giản thành một khối thống nhất */
-    .add-item-form {
-      display: grid;
-      grid-template-columns: 1.5fr 1.5fr 1fr 1.5fr;
-      gap: .6rem;
-      margin-bottom: 1.5rem;
-      background: var(--surface);
-      padding: 1rem;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
+    table input[type="text"], table input[type="number"] {
+      padding: .3rem .5rem;
+      font-size: .8rem;
+      background: #050811;
     }
+    .btn-inline {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: .85rem;
+      font-weight: bold;
+      padding: 2px 5px;
+    }
+    .btn-inline.save { color: var(--green); }
+    .btn-inline.cancel { color: var(--red); }
+    .btn-inline.edit { color: var(--accent); font-size: 0.9rem; margin-right: 5px; }
 
-    /* Khối kết quả hiển thị dạng Hologram / Terminal */
     .resource-cell { font-size: .8rem; line-height: 1.8; min-width: 220px; }
     .resource-cell .label {
       color: var(--muted);
@@ -147,7 +150,6 @@
     .resource-cell .value.hours    { color: var(--green);  font-weight: 700; }
     .resource-cell hr { border: none; border-top: 1px solid rgba(30, 53, 94, 0.4); margin: .4rem 0; }
 
-    /* Thiết kế Button kiểu góc cạnh Sci-Fi */
     .btn-add {
       display: inline-flex;
       align-items: center;
@@ -193,6 +195,44 @@
       text-transform: uppercase;
     }
 
+    /* CSS Đặc chế cho mảng Terminal Log Entries */
+    .log-terminal-box {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(13, 21, 39, 0.6);
+      backdrop-filter: blur(5px);
+      padding: 15px;
+      min-height: 100px;
+    }
+    .log-dynamic-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      color: var(--accent);
+      border-bottom: 1px solid var(--accent);
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+    .log-list-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .log-entry-row {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.85rem;
+      color: #e2e8f0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .log-arrow {
+      color: var(--accent);
+      font-weight: bold;
+      user-select: none;
+    }
+
     #status { text-align: center; padding: 3rem; color: var(--accent); font-size: .8rem; letter-spacing: .1em; }
     .spinner {
       display: inline-block;
@@ -209,12 +249,11 @@
 
     @media (max-width: 900px) {
       .main-grid { grid-template-columns: 1fr; gap: 1.5rem; }
-      .add-item-form { grid-template-columns: 1fr 1fr; }
+      .bottom-grid { grid-template-columns: 1fr !important; gap: 1.5rem; }
     }
     @media (max-width: 600px) {
       header h1 { font-size: 1.3rem; letter-spacing: .1em; }
       tbody td, thead th { padding: .6rem .8rem; }
-      .add-item-form { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -252,7 +291,7 @@
               <th>Required Materials</th>
               <th style="text-align: right; width: 100px;">Points</th>
               <th>Notes</th>
-              <th style="width: 75px;"></th>
+              <th style="width: 85px;"></th>
             </tr>
           </thead>
           <tbody id="items-body"></tbody>
@@ -285,14 +324,28 @@
 
   </div>
 
-  <div class="section-title" style="margin-top: 2rem;">💎 CORE RARITY VALUES</div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr id="rarity-header"></tr>
-      </thead>
-      <tbody id="rarity-body"></tbody>
-    </table>
+  <div class="bottom-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; margin-top: 2rem;">
+    
+    <div>
+      <div class="section-title">💎 CORE RARITY VALUES</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr id="rarity-header"></tr>
+          </thead>
+          <tbody id="rarity-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">💾 SYSTEM LOGS / NOTES</div>
+      <div class="log-terminal-box">
+        <div id="note-zone-title" class="log-dynamic-title">OPERATIONAL GUIDELINES & LOG ENTRIES</div>
+        <div id="system-notes-container" class="log-list-container"></div>
+      </div>
+    </div>
+
   </div>
 
 </div>
@@ -303,7 +356,10 @@ import { fetchAll } from "./sheets-data.js";
 let workshops = [];
 let items = [];
 let defaultMaterials = [];
+let systemNotes = { title: "SYSTEM LOGS", logs: [] }; 
 let rowCount = 0;
+let inlineRowCount = 0; 
+let editingIdx = null; 
 
 function renderWorkshops() {
   const tbody = document.getElementById("workshop-body");
@@ -326,20 +382,41 @@ function renderItemsTable() {
     tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1rem">Database empty.</td></tr>`;
     return;
   }
-  tbody.innerHTML = items.map((it, idx) => `
-    <tr>
-      <td>
-        <strong>${esc(it.name)}</strong> 
-        ${it.isCustom ? '<span class="badge-custom">Sim</span>' : ''}
-      </td>
-      <td style="font-size: 0.8rem; color: var(--muted);">${esc(it.materials || '—')}</td>
-      <td style="text-align: right; font-weight: 600; color: var(--accent);">${fmt(it.pointsNeeded)}</td>
-      <td style="font-size: 0.8rem; color: var(--muted); max-width: 150px;">${esc(it.note || '—')}</td>
-      <td>
-        ${it.isCustom ? `<button class="btn-remove" onclick="removeCustomItem(${idx})" title="Erase item">✕</button>` : ''}
-      </td>
-    </tr>
-  `).join("");
+  
+  tbody.innerHTML = items.map((it, idx) => {
+    if (editingIdx === idx) {
+      return `
+        <tr style="background: rgba(0, 240, 255, 0.04);">
+          <td><input type="text" id="edit-name-${idx}" value="${esc(it.name)}" /></td>
+          <td><input type="text" id="edit-mats-${idx}" value="${esc(it.materials || '')}" /></td>
+          <td><input type="number" id="edit-points-${idx}" value="${it.pointsNeeded}" min="0" style="text-align: right;" /></td>
+          <td><input type="text" id="edit-note-${idx}" value="${esc(it.note || '')}" /></td>
+          <td style="text-align: center; white-space: nowrap;">
+            <button class="btn-inline save" onclick="saveEditItem(${idx})" title="Confirm Update">✔</button>
+            <button class="btn-inline cancel" onclick="cancelEdit()" title="Cancel">✕</button>
+          </td>
+        </tr>
+      `;
+    }
+
+    return `
+      <tr>
+        <td>
+          <strong>${esc(it.name)}</strong> 
+          ${it.isCustom ? '<span class="badge-custom">Sim</span>' : ''}
+        </td>
+        <td style="font-size: 0.8rem; color: var(--muted);">${esc(it.materials || '—')}</td>
+        <td style="text-align: right; font-weight: 600; color: var(--accent);">${fmt(it.pointsNeeded)}</td>
+        <td style="font-size: 0.8rem; color: var(--muted); max-width: 150px;">${esc(it.note || '—')}</td>
+        <td style="text-align: center; white-space: nowrap;">
+          ${it.isCustom ? `
+            <button class="btn-inline edit" onclick="startEditItem(${idx})" title="Edit Item">✎</button>
+            <button class="btn-remove" onclick="removeCustomItem(${idx})" title="Erase item">✕</button>
+          ` : ''}
+        </td>
+      </tr>
+    `;
+  }).join("");
 }
 
 function renderDefaultMaterials() {
@@ -353,6 +430,35 @@ function renderDefaultMaterials() {
   tbody.innerHTML = `<tr>${defaultMaterials.map(d => `<td style="font-weight:700; color:var(--accent)">${fmt(d.points)} PTS</td>`).join("")}</tr>`;
 }
 
+// FIX HÀM RENDER TIÊU ĐỀ ĐỘNG & LOGS CHẠY LINH HOẠT THEO OBJECT MỚI
+function renderSystemNotes(systemNotesData) {
+  const titleElement = document.getElementById('note-zone-title'); 
+  const containerElement = document.getElementById('system-notes-container'); 
+
+  if (systemNotesData && systemNotesData.title) {
+    // 1. Gắn tiêu đề động chữ IN HOA phong cách Cyberpunk
+    if (titleElement) {
+      titleElement.textContent = systemNotesData.title.toUpperCase(); 
+    }
+
+    // 2. Đổ danh sách mảng logs
+    if (containerElement) {
+      containerElement.innerHTML = ''; 
+      
+      if (systemNotesData.logs && systemNotesData.logs.length > 0) {
+        systemNotesData.logs.forEach(logText => {
+          const logRow = document.createElement('div');
+          logRow.className = 'log-entry-row'; 
+          logRow.innerHTML = `<span class="log-arrow">&gt;</span> <span>${esc(logText)}</span>`;
+          containerElement.appendChild(logRow);
+        });
+      } else {
+        containerElement.innerHTML = '<div class="log-entry-row" style="color:var(--muted)">> No guidelines found in this configuration.</div>';
+      }
+    }
+  }
+}
+
 function refreshAllDropdowns() {
   const selects = document.querySelectorAll(`[id^="sel-"]`);
   selects.forEach(selectEl => {
@@ -360,25 +466,116 @@ function refreshAllDropdowns() {
     selectEl.innerHTML = `<option value="">-- Select Item --</option>` + 
       items.map(it => `<option value="${esc(it.name)}" ${it.name === currentVal ? "selected" : ""}>${esc(it.name)}</option>`).join("");
   });
+  
+  selects.forEach(selectEl => {
+    if(selectEl.value) {
+      const rowId = selectEl.id.replace("sel-", "");
+      updateRow(rowId);
+    }
+  });
 }
 
-window.handleCreateCustomItem = function(e) {
-  e.preventDefault();
-  const nameEl = document.getElementById("c-name");
-  const matsEl = document.getElementById("c-mats");
-  const pointsEl = document.getElementById("c-points");
-  const noteEl = document.getElementById("c-note");
+window.startEditItem = function(index) {
+  editingIdx = index;
+  renderItemsTable();
+};
+
+window.cancelEdit = function() {
+  editingIdx = null;
+  renderItemsTable();
+};
+
+window.saveEditItem = function(index) {
+  const nameEl = document.getElementById(`edit-name-${index}`);
+  const matsEl = document.getElementById(`edit-mats-${index}`);
+  const pointsEl = document.getElementById(`edit-points-${index}`);
+  const noteEl = document.getElementById(`edit-note-${index}`);
+
+  if (!nameEl || !pointsEl) return;
+
+  const oldName = items[index].name;
+  const newName = nameEl.value.trim();
+  const pointsStr = pointsEl.value.trim();
+
+  if (!newName || !pointsStr) {
+    nameEl.style.borderColor = newName ? "var(--border)" : "var(--red)";
+    pointsEl.style.borderColor = pointsStr ? "var(--border)" : "var(--red)";
+    return;
+  }
+
+  if (items.some((it, idx) => idx !== index && it.name.toLowerCase() === newName.toLowerCase())) {
+    nameEl.style.borderColor = "var(--red)";
+    return;
+  }
+
+  if (oldName !== newName) {
+    const selects = document.querySelectorAll(`[id^="sel-"]`);
+    selects.forEach(sel => {
+      if (sel.value === oldName) sel.value = newName;
+    });
+  }
+
+  items[index].name = newName;
+  items[index].materials = matsEl.value.trim();
+  items[index].pointsNeeded = parseFloat(pointsStr) || 0;
+  items[index].note = noteEl.value.trim();
+
+  editingIdx = null; 
+  renderItemsTable();
+  refreshAllDropdowns();
+};
+
+window.addCustomItemRow = function() {
+  inlineRowCount++;
+  const id = inlineRowCount;
+  const tbody = document.getElementById("items-inline-form-body");
+  const tr = document.createElement("tr");
+  tr.id = `inline-row-${id}`;
+  tr.style.background = "rgba(0, 240, 255, 0.03)"; 
+  
+  tr.innerHTML = `
+    <td><input type="text" id="inline-name-${id}" placeholder="Item name..." /></td>
+    <td><input type="text" id="inline-mats-${id}" placeholder="Materials..." /></td>
+    <td><input type="number" id="inline-points-${id}" placeholder="Pts" min="0" style="text-align: right;" /></td>
+    <td><input type="text" id="inline-note-${id}" placeholder="Note..." /></td>
+    <td style="text-align: center; white-space: nowrap;">
+      <button class="btn-inline save" onclick="saveInlineItem(${id})" title="Save Protocol">✔</button>
+      <button class="btn-inline cancel" onclick="cancelInlineRow(${id})" title="Cancel">✕</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+};
+
+window.cancelInlineRow = function(id) {
+  document.getElementById(`inline-row-${id}`)?.remove();
+};
+
+window.saveInlineItem = function(id) {
+  const nameEl = document.getElementById(`inline-name-${id}`);
+  const matsEl = document.getElementById(`inline-mats-${id}`);
+  const pointsEl = document.getElementById(`inline-points-${id}`);
+  const noteEl = document.getElementById(`inline-note-${id}`);
+
+  if (!nameEl || !pointsEl) return;
 
   const name = nameEl.value.trim();
+  const pointsStr = pointsEl.value.trim();
+
+  if (!name || !pointsStr) {
+    nameEl.style.borderColor = name ? "var(--border)" : "var(--red)";
+    pointsEl.style.borderColor = pointsStr ? "var(--border)" : "var(--red)";
+    return;
+  }
+
   if (items.some(it => it.name.toLowerCase() === name.toLowerCase())) {
-  
+    nameEl.style.borderColor = "var(--red)";
     return;
   }
 
   const newItem = {
     name: name,
     materials: matsEl.value.trim(),
-    pointsNeeded: parseFloat(pointsEl.value) || 0,
+    pointsNeeded: parseFloat(pointsStr) || 0,
     note: noteEl.value.trim(),
     isCustom: true
   };
@@ -386,14 +583,14 @@ window.handleCreateCustomItem = function(e) {
   items.push(newItem);
   renderItemsTable();
   refreshAllDropdowns();
-  document.getElementById("custom-item-form").reset();
+
+  document.getElementById(`inline-row-${id}`)?.remove();
 };
 
 window.removeCustomItem = function(index) {
   const targetItem = items[index];
   if (!targetItem || !targetItem.isCustom) return;
   
-  // Nếu có dòng nào ở bảng Crafting đang chọn item này, reset dòng đó về trống
   const selects = document.querySelectorAll(`[id^="sel-"]`);
   selects.forEach(sel => {
     if (sel.value === targetItem.name) {
@@ -429,7 +626,7 @@ window.addCraftRow = function (itemName = "", qty = 1) {
         oninput="updateRow(${id})" onchange="updateRow(${id})" />
     </td>
     <td class="resource-cell" id="res-${id}">
-      <span style="color:var(--muted);font-size:.8rem"><- Waiting for item selection</span>
+      <span style="color:var(--muted);font-size:.8rem">&lt;- Waiting for item selection</span>
     </td>
     <td><button class="btn-remove" onclick="removeRow(${id})" title="Purge row">✕</button></td>
   `;
@@ -452,7 +649,7 @@ window.updateRow = function (id) {
   const qty  = Math.max(1, isNaN(parsedQty) ? 1 : parsedQty);
 
   if (!name) {
-    resEl.innerHTML = `<span style="color:var(--muted);font-size:.8rem"><- Waiting for item selection</span>`;
+    resEl.innerHTML = `<span style="color:var(--muted);font-size:.8rem">&lt;- Waiting for item selection</span>`;
     return;
   }
 
@@ -507,6 +704,10 @@ function scaleMaterials(raw, qty) {
     m = part.match(/^(.+?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)$/);
     if (m) return `${esc(m[1])} x${fmt(parseNum(m[2]) * qty)}`;
 
+    if (/^\d+(?:[.,]\d+)?$/.test(part)) {
+      return `${fmt(parseNum(part) * qty)}`;
+    }
+
     const def = defaultMaterials.find(d => d.rarity.toLowerCase() === part.toLowerCase());
     if (def) {
       return `${esc(part)} x${fmt(qty)} <span style="color:var(--muted)">(${fmt(def.points)} pts/u)</span>`;
@@ -539,10 +740,12 @@ function fmtNum(n) {
     workshops = data.workshops;
     items = data.items;
     defaultMaterials = data.defaultMaterials;
+    systemNotes = data.systemNotes || { title: "SYSTEM LOGS", logs: [] }; 
 
     renderWorkshops();
     renderItemsTable();
     renderDefaultMaterials();
+    renderSystemNotes(systemNotes); // ĐÃ THÊM THAM SỐ TRUYỀN DỮ LIỆU ĐÚNG LUỒNG DYNAMIC
     addCraftRow();
 
     status.style.display = "none";
